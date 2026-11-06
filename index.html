@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Определитель породы собаки</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f4f1ea; margin: 0;
+           display: flex; justify-content: center; padding: 24px; color: #222; }
+    .card { background: #fff; border-radius: 16px; padding: 24px; max-width: 480px;
+            width: 100%; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
+    h1 { font-size: 1.4rem; margin-top: 0; }
+    .drop { border: 2px dashed #b9b2a3; border-radius: 12px; padding: 28px;
+            text-align: center; cursor: pointer; color: #666; }
+    .drop.over { background: #f0ebe0; }
+    #preview { max-width: 100%; border-radius: 12px; margin-top: 16px; display: none; }
+    #status { margin-top: 16px; color: #666; }
+    #status.error { color: #b3261e; }
+    .row { margin-top: 14px; }
+    .label { display: flex; justify-content: space-between;
+             text-transform: capitalize; font-weight: 600; }
+    .bar { height: 10px; background: #eee; border-radius: 5px; overflow: hidden; margin-top: 4px; }
+    .fill { height: 100%; background: #4a7c59; width: 0; transition: width .5s; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Какая это порода?</h1>
+    <div class="drop" id="drop">Нажмите или перетащите фото собаки сюда</div>
+    <input type="file" id="file" accept="image/*" hidden>
+    <img id="preview" alt="Загруженное фото">
+    <div id="status"></div>
+    <div id="results"></div>
+  </div>
+
+  <script>
+    // Адрес нашего сервера из main.py
+    const API_URL = "http://127.0.0.1:8000/predict";
+
+    const drop = document.getElementById("drop");
+    const input = document.getElementById("file");
+    const preview = document.getElementById("preview");
+    const statusEl = document.getElementById("status");
+    const results = document.getElementById("results");
+
+    // Клик по зоне открывает выбор файла
+    drop.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => {
+      if (input.files[0]) handleFile(input.files[0]);
+    });
+
+    // Перетаскивание файла мышкой
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      drop.classList.remove("over");
+      if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+
+    function showError(text) {
+      statusEl.textContent = text;
+      statusEl.className = "error";
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    async function handleFile(file) {
+      if (!file.type.startsWith("image/")) {
+        showError("Выберите файл-изображение");
+        return;
+      }
+      // Показываем превью и сбрасываем прошлый результат
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = "block";
+      results.innerHTML = "";
+      statusEl.className = "";
+      statusEl.textContent = "Определяю породу…";
+
+      // Отправляем фото на сервер как форму с полем "file" (так ждёт main.py)
+      const form = new FormData();
+      form.append("file", file);
+
+      try {
+        const res = await fetch(API_URL, { method: "POST", body: form });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Ошибка сервера");
+        }
+        const data = await res.json();
+        render(data.predictions);
+      } catch (e) {
+        showError(e.message === "Failed to fetch"
+          ? "Сервер не отвечает. Запущен ли uvicorn?"
+          : e.message);
+      }
+    }
+
+    // Рисуем топ-3 породы с полосками вероятности
+    function render(preds) {
+      statusEl.textContent = "";
+      results.innerHTML = preds.map((p) => {
+        const pct = (p.confidence * 100).toFixed(1);
+        return `<div class="row">
+          <div class="label"><span>${escapeHtml(p.breed)}</span><span>${pct}%</span></div>
+          <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+        </div>`;
+      }).join("");
+    }
+  </script>
+</body>
+</html>
